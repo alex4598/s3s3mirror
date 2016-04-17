@@ -12,7 +12,7 @@ import java.util.Date;
 
 import static org.cobbzilla.s3s3mirror.MirrorConstants.*;
 
-public class MirrorOptions implements AWSCredentials {
+public abstract class MirrorOptions implements AWSCredentials {
 
     public static final String S3_PROTOCOL_PREFIX = "s3://";
 
