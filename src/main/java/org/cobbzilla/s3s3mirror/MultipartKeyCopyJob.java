@@ -83,25 +83,25 @@ public class MultipartKeyCopyJob extends KeyCopyJob {
 
             bytePosition += partSize;
         }
-        log.info("i have "+threadPool.size()+" threads aligning to finish the upload");
+        log.info("i have " + threadPool.size() + " threads aligning to finish the upload");
         long start = System.currentTimeMillis();
 
-        for (Thread t:threadPool){
+        for (Thread t : threadPool) {
             try {
                 t.join();
             } catch (InterruptedException e) {
-               log.error("something went horribly wrong!");
+                log.error("something went horribly wrong!");
             }
         }
         long time = System.currentTimeMillis() - start;
 
-        log.info("threads finished after "+String.valueOf(time)+" millis");
+        log.info("threads finished after " + String.valueOf(time) + " millis");
 
 
         CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest(targetBucketName, keydest,
                 initResult.getUploadId(), getETags(copyResponses));
         client.completeMultipartUpload(completeRequest);
-        if(options.isVerbose()) {
+        if (options.isVerbose()) {
             log.info("completed multipart request for : " + summary.getKey());
         }
         context.getStats().bytesCopied.addAndGet(objectSize);
