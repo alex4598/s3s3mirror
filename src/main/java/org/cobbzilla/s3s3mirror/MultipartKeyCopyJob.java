@@ -19,11 +19,11 @@ public class MultipartKeyCopyJob extends KeyCopyJob {
     @Override
     boolean keyCopied(ObjectMetadata sourceMetadata, AccessControlList objectAcl) {
         long objectSize = summary.getSize();
-        MirrorOptions options = context.getOptions();
+        final MirrorOptions options = context.getOptions();
         String sourceBucketName = options.getSourceBucket();
-        int maxPartRetries = options.getMaxRetries();
-        String targetBucketName = options.getDestinationBucket();
-        List<CopyPartResult> copyResponses = new ArrayList<CopyPartResult>();
+        final int maxPartRetries = options.getMaxRetries();
+        final String targetBucketName = options.getDestinationBucket();
+        final List<CopyPartResult> copyResponses = new ArrayList<CopyPartResult>();
         if (options.isVerbose()) {
             log.info("Initiating multipart upload request for " + summary.getKey());
         }
@@ -36,7 +36,7 @@ public class MultipartKeyCopyJob extends KeyCopyJob {
             initiateRequest.withAccessControlList(objectAcl);
         }
 
-        InitiateMultipartUploadResult initResult = client.initiateMultipartUpload(initiateRequest);
+        final InitiateMultipartUploadResult initResult = client.initiateMultipartUpload(initiateRequest);
 
         final long optionsUploadPartSize = options.getUploadPartSize();
         long partSize = MirrorOptions.MINIMUM_PART_SIZE;
@@ -128,14 +128,15 @@ public class MultipartKeyCopyJob extends KeyCopyJob {
         }
 
         long bytePosition = 0;
+        List<Thread> threadPool = new ArrayList<Thread>();
 
         for (int i = 1; bytePosition < objectSize; i++) {
             long lastByte = bytePosition + partSize - 1 >= objectSize ? objectSize - 1 : bytePosition + partSize - 1;
-            String infoMessage = "copying : " + bytePosition + " to " + lastByte;
+            final String infoMessage = "copying : " + bytePosition + " to " + lastByte;
             if (options.isVerbose()) {
                 log.info(infoMessage);
             }
-            CopyPartRequest copyRequest = new CopyPartRequest()
+            final CopyPartRequest copyRequest = new CopyPartRequest()
                     .withDestinationBucketName(targetBucketName)
                     .withDestinationKey(keydest)
                     .withSourceBucketName(sourceBucketName)
@@ -145,24 +146,47 @@ public class MultipartKeyCopyJob extends KeyCopyJob {
                     .withLastByte(lastByte)
                     .withPartNumber(i);
 
-            for (int tries = 1; tries <= maxPartRetries; tries++) {
-                try {
-                    if (options.isVerbose()) log.info("try :" + tries);
-                    context.getStats().s3copyCount.incrementAndGet();
-                    CopyPartResult copyPartResult = client.copyPart(copyRequest);
-                    copyResponses.add(copyPartResult);
-                    if (options.isVerbose()) log.info("completed " + infoMessage);
-                    break;
-                } catch (Exception e) {
-                    if (tries == maxPartRetries) {
-                        client.abortMultipartUpload(new AbortMultipartUploadRequest(
-                                targetBucketName, keydest, initResult.getUploadId()));
-                        log.error("Exception while doing multipart copy", e);
-                        return false;
-                    }
-                }
-            }
+                    Thread copyThread = new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            for (int tries = 1; tries <= maxPartRetries; tries++) {
+                                try {
+                                    if (options.isVerbose()) log.info("try :" + tries);
+                                    context.getStats().s3copyCount.incrementAndGet();
+                                    CopyPartResult copyPartResult = client.copyPart(copyRequest);
+                                    copyResponses.add(copyPartResult);
+                                    if (options.isVerbose()) log.info("completed " + infoMessage);
+                                    break;
+                                } catch (Exception e) {
+                                    if (tries == maxPartRetries) {
+                                        client.abortMultipartUpload(new AbortMultipartUploadRequest(
+                                                targetBucketName, keydest, initResult.getUploadId()));
+                                        log.error("Exception while doing multipart copy", e);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    copyThread.start();
+                    threadPool.add(copyThread);
             bytePosition += partSize;
+        }
+        if (options.isVerbose()) {
+            log.info(threadPool.size() + "Will spawn " + threadPool.size() + "threads for " + summary.getKey());
+        }
+        long start = System.currentTimeMillis();
+
+        for (Thread t : threadPool) {
+            try {
+                t.join();
+            } catch (InterruptedException e) {
+                log.error("Something went terribly wrong!", e);
+            }
+        }
+        long time = System.currentTimeMillis() - start;
+        if (options.isVerbose()) {
+            log.info(threadPool.size() + "threads finished after " + String.valueOf(time/1000) + " seconds.");
         }
         CompleteMultipartUploadRequest completeRequest = new CompleteMultipartUploadRequest(targetBucketName, keydest,
                 initResult.getUploadId(), getETags(copyResponses));
