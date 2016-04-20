@@ -215,6 +215,7 @@ public class MirrorOptions implements AWSCredentials {
         268435392,
         536869740
     };
+    public static final int MULTIPART_FORK_POOL_SIZE = 32;
     private static final String MULTI_PART_UPLOAD_SIZE_USAGE = "The upload size (in bytes) of each part uploaded as part of a multipart request " +
             "for files that are greater than the max allowed file size of " + MAX_SINGLE_REQUEST_UPLOAD_FILE_SIZE + " bytes ("+(MAX_SINGLE_REQUEST_UPLOAD_FILE_SIZE/GB)+"GB). " +
             "Defaults to " + DEFAULT_PART_SIZE + " bytes ("+(DEFAULT_PART_SIZE/MB)+"MB).";
