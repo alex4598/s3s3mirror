@@ -4,6 +4,7 @@ import com.amazonaws.ClientConfiguration;
 import com.amazonaws.Protocol;
 import com.amazonaws.services.s3.AmazonS3Client;
 import com.amazonaws.auth.InstanceProfileCredentialsProvider;
+import com.amazonaws.auth.BasicSessionCredentials;
 import lombok.Cleanup;
 import lombok.Getter;
 import lombok.Setter;
@@ -76,7 +77,10 @@ public class MirrorMain {
                     .withProxyPort(options.getProxyPort());
         }
         AmazonS3Client client = null;
-        if (options.hasAwsKeys()) {
+        if(System.getenv("AWS_SECURITY_TOKEN") != null) {
+            BasicSessionCredentials basicSessionCredentials = new BasicSessionCredentials(System.getenv("AWS_ACCESS_KEY_ID"), System.getenv("AWS_SECRET_ACCESS_KEY"), System.getenv("AWS_SECURITY_TOKEN"));
+            client = new AmazonS3Client(basicSessionCredentials, clientConfiguration);
+        } else if (options.hasAwsKeys()) {
             client = new AmazonS3Client(options, clientConfiguration);
         } else if (options.isUseIamRole()) {
             client = new AmazonS3Client(new InstanceProfileCredentialsProvider(), clientConfiguration);
@@ -98,6 +102,7 @@ public class MirrorMain {
             if (!options.hasAwsKeys() && options.getProfile() != null) loadAwsKeysFromAwsConfig();
             if (!options.hasAwsKeys()) loadAwsKeysFromS3Config();
             if (!options.hasAwsKeys()) loadAwsKeysFromAwsConfig();
+            if (!options.hasAwsKeys()) loadAwsKeysFromAwsCredentials();
             if (!options.hasAwsKeys()) {
                 throw new IllegalStateException("Could not find credentials, IAM Role usage not specified and ENV vars not defined: " + MirrorOptions.AWS_ACCESS_KEY + " and/or " + MirrorOptions.AWS_SECRET_KEY);
             }
@@ -144,6 +149,37 @@ public class MirrorMain {
                     // if no defined profile, use '[default]' otherwise use profile with matching name
                     if ((options.getProfile() == null && line.equals("[default]"))
                             || (options.getProfile() != null && line.equals("[profile " + options.getProfile() + "]"))) {
+                        skipSection = false;
+                    } else {
+                        skipSection = true;
+                    }
+                    continue;
+                }
+                if (skipSection) continue;
+                if (line.startsWith("aws_access_key_id")) {
+                    options.setAWSAccessKeyId(line.substring(line.indexOf("=") + 1).trim());
+                } else if (line.startsWith("aws_secret_access_key")) {
+                    options.setAWSSecretKey(line.substring(line.indexOf("=") + 1).trim());
+                }
+            }
+        } catch (Exception e) {
+            // ignore - let other credential-discovery processes have a crack
+        }
+    }
+    
+    private void loadAwsKeysFromAwsCredentials() {
+        try {
+            // try to load from ~/.aws/config
+            @Cleanup BufferedReader reader = new BufferedReader(new FileReader(
+                    System.getProperty("user.home") + File.separator + ".aws" + File.separator + "credentials"));
+            String line;
+            boolean skipSection = true;
+            while ((line = reader.readLine()) != null) {
+                line = line.trim();
+                if (line.startsWith("[")) {
+                    // if no defined profile, use '[default]' otherwise use profile with matching name
+                    if ((options.getProfile() == null && line.equals("[default]"))
+                            || (options.getProfile() != null && line.equals("[" + options.getProfile() + "]"))) {
                         skipSection = false;
                     } else {
                         skipSection = true;
